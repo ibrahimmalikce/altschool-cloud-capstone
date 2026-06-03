@@ -1,0 +1,47 @@
+---
+- name: Configure Bastion Host for EKS Management
+  hosts: bastion
+  become: true
+  tasks:
+
+    - name: Update all system packages
+      dnf:
+        name: "*"
+        state: latest
+        update_cache: yes
+
+    - name: Install Docker and Git utilities
+      dnf:
+        name:
+          - docker
+          - git
+        state: present
+
+    - name: Start and enable Docker Service
+      service:
+        name: docker
+        state: started
+        enabled: yes
+
+    - name: Grant ec2-user permission to use Docker
+      user:
+        name: ec2-user
+        groups: docker
+        append: yes
+
+    - name: Download stable kubectl binary
+      get_url:
+        url: "https://dl.k8s.io/release/v1.30.0/bin/linux/amd64/kubectl"
+        dest: /usr/local/bin/kubectl
+        mode: '0755'
+
+    - name: Download Helm installation script
+      get_url:
+        url: https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3
+        dest: /tmp/get_helm.sh
+        mode: '0700'
+
+    - name: Execute Helm installation script
+      command: /tmp/get_helm.sh
+      args:
+        creates: /usr/local/bin/helm
