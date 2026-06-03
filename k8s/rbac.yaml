@@ -1,0 +1,25 @@
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  namespace: retail-app
+  name: retail-viewer-role
+rules:
+- apiGroups: ["", "apps"]
+  resources: ["pods", "services", "deployments", "replicasets"]
+  verbs: ["get", "list", "watch"]
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: retail-viewer-binding
+  namespace: retail-app
+subjects:
+- kind: Group
+  name: retail-viewer
+  apiGroup: rbac.authorization.k8s.io
+roleRef:
+  kind: Role
+  name: retail-viewer-role
+  apiGroup: rbac.authorization.k8s.io

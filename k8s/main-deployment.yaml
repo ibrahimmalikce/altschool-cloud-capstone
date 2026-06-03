@@ -1,12 +1,5 @@
 ---
-# 1. Create the Required Namespace
-apiVersion: v1
-kind: Namespace
-metadata:
-  name: retail-app 
-
----
-# 2. Backend Deployment & Service
+# 1. Backend Deployment & Service (Connected to RDS & DynamoDB)
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -27,7 +20,18 @@ spec:
         image: public.ecr.aws/aws-containers/retail-store-sample-catalog:1.0.0
         ports:
         - containerPort: 8080
-
+        env:
+        - name: MYSQL_ENDPOINT
+          value: "bedrock-mysql.c4fgiqikeaa8.us-east-1.rds.amazonaws.com"
+        - name: POSTGRES_ENDPOINT
+          value: "bedrock-postgres.c4fgiqikeaa8.us-east-1.rds.amazonaws.com"
+        - name: DYNAMODB_TABLE
+          value: "bedrock-table"
+        - name: DB_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: bedrock-db-secret
+              key: password
 ---
 apiVersion: v1
 kind: Service
@@ -43,7 +47,7 @@ spec:
       targetPort: 8080
 
 ---
-# 3. Frontend Deployment & LoadBalancer
+# 2. Frontend Deployment & Service
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -64,7 +68,6 @@ spec:
         image: public.ecr.aws/aws-containers/retail-store-sample-ui:1.0.0
         ports:
         - containerPort: 8080
-
 ---
 apiVersion: v1
 kind: Service
@@ -72,9 +75,32 @@ metadata:
   name: frontend-service
   namespace: retail-app
 spec:
-  type: LoadBalancer
+  type: NodePort
   selector:
     app: frontend-ui
   ports:
     - port: 80
       targetPort: 8080
+
+---
+# 3. Application Load Balancer (ALB) Ingress
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: retail-app-ingress
+  namespace: retail-app
+  annotations:
+    kubernetes.io/ingress.class: alb
+    alb.ingress.kubernetes.io/scheme: internet-facing
+    alb.ingress.kubernetes.io/target-type: ip
+spec:
+  rules:
+    - http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: frontend-service
+                port:
+                  number: 80
