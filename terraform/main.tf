@@ -1,4 +1,3 @@
-# 1. PROVIDER - STRICTLY US-EAST-1
 terraform {
   required_version = ">= 1.3.0"
   required_providers {
@@ -10,26 +9,21 @@ terraform {
 }
 
 provider "aws" {
-  region = "us-east-1" 
+  region = "us-east-1"
   default_tags {
     tags = {
-      Project     = "Capstone-EKS-Deployment"
-      ManagedBy   = "Terraform"
-      Environment = "Production"
+      Project = "karatu-2025-capstone"
     }
   }
 }
 
-# 2. VPC ARCHITECTURE 
-data "aws_availability_zones" "available" {
-  state = "available"
-}
+data "aws_availability_zones" "available" { state = "available" }
 
 module "vpc" {
   source  = "terraform-aws-modules/vpc/aws"
   version = "5.8.1"
 
-  name = "capstone-vpc"
+  name = "project-bedrock-vpc"
   cidr = "10.0.0.0/16" 
 
   azs             = slice(data.aws_availability_zones.available.names, 0, 2)
@@ -41,24 +35,18 @@ module "vpc" {
   enable_dns_hostnames = true
   enable_dns_support   = true
 
-  public_subnet_tags = {
-    "kubernetes.io/role/elb" = 1
-  }
-  private_subnet_tags = {
-    "kubernetes.io/role/internal-elb" = 1
-  }
+  public_subnet_tags  = { "kubernetes.io/role/elb" = 1 }
+  private_subnet_tags = { "kubernetes.io/role/internal-elb" = 1 }
 }
 
-# 3. EKS CLUSTER (PRIVATE NODES ONLY)
 module "eks" {
   source  = "terraform-aws-modules/eks/aws"
   version = "20.8.5"
 
-  cluster_name    = "capstone-cluster"
-  cluster_version = "1.30" # BUMPED: Upgraded from the retired 1.29 version
+  cluster_name    = "project-bedrock-cluster"
+  cluster_version = "1.30" 
 
   cluster_endpoint_public_access  = true
-  
   vpc_id                   = module.vpc.vpc_id
   subnet_ids               = module.vpc.private_subnets 
   control_plane_subnet_ids = module.vpc.private_subnets
@@ -68,29 +56,48 @@ module "eks" {
       min_size     = 2
       max_size     = 3
       desired_size = 2
-
       instance_types = ["t3.medium"]
       capacity_type  = "ON_DEMAND"
-      ami_type       = "AL2023_x86_64_STANDARD" # ADDED: Explicitly requests the supported Amazon Linux 2023 image
+      ami_type       = "AL2023_x86_64_STANDARD" 
     }
   }
 
   enable_cluster_creator_admin_permissions = true
 }
 
-# 4. OUTPUTS
-output "cluster_name" {
-  value = module.eks.cluster_name
-}
-output "cluster_endpoint" {
-  value = module.eks.cluster_endpoint
+resource "aws_iam_user" "developer" {
+  name = "bedrock-dev-view"
 }
 
-# ==========================================
-# 5. BASTION HOST & SECURITY
-# ==========================================
+resource "aws_s3_bucket" "assets" {
+  bucket = "bedrock-assets-alt-soe-025-3210" 
+}
 
-# Dynamically generate an SSH Key Pair
+resource "aws_iam_role" "lambda_role" {
+  name = "bedrock_lambda_role"
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{ Action = "sts:AssumeRole", Effect = "Allow", Principal = { Service = "lambda.amazonaws.com" } }]
+  })
+}
+
+data "archive_file" "dummy_lambda" {
+  type        = "zip"
+  output_path = "${path.module}/dummy_lambda.zip"
+  source {
+    content  = "def lambda_handler(event, context):\n    pass"
+    filename = "index.py"
+  }
+}
+
+resource "aws_lambda_function" "asset_processor" {
+  filename         = data.archive_file.dummy_lambda.output_path
+  function_name    = "bedrock-asset-processor"
+  role             = aws_iam_role.lambda_role.arn
+  handler          = "index.lambda_handler"
+  runtime          = "python3.12"
+}
+
 resource "tls_private_key" "bastion_key" {
   algorithm = "RSA"
   rsa_bits  = 4096
@@ -101,24 +108,21 @@ resource "aws_key_pair" "bastion_key_pair" {
   public_key = tls_private_key.bastion_key.public_key_openssh
 }
 
-# Save the private key locally so you can use it to connect
 resource "local_file" "private_key" {
   content         = tls_private_key.bastion_key.private_key_pem
   filename        = "${path.module}/bastion-key.pem"
   file_permission = "0400"
 }
 
-# Security Group for the Bastion Host
 resource "aws_security_group" "bastion_sg" {
-  name        = "bastion-sg"
-  description = "Allow SSH access to bastion"
-  vpc_id      = module.vpc.vpc_id
+  name   = "bastion-sg"
+  vpc_id = module.vpc.vpc_id
 
   ingress {
     from_port   = 22
     to_port     = 22
     protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"] # Open to internet for ease of assessment access
+    cidr_blocks = ["0.0.0.0/0"]
   }
 
   egress {
@@ -129,7 +133,6 @@ resource "aws_security_group" "bastion_sg" {
   }
 }
 
-# Fetch the latest Amazon Linux 2023 Image
 data "aws_ami" "amazon_linux" {
   most_recent = true
   owners      = ["amazon"]
@@ -140,23 +143,18 @@ data "aws_ami" "amazon_linux" {
   }
 }
 
-# The Bastion EC2 Instance
 resource "aws_instance" "bastion" {
-  ami           = data.aws_ami.amazon_linux.id
-  instance_type = "t3.micro"
-  subnet_id     = module.vpc.public_subnets[0] # CRITICAL: Placed in the public subnet
-
+  ami                         = data.aws_ami.amazon_linux.id
+  instance_type               = "t3.micro"
+  subnet_id                   = module.vpc.public_subnets[0]
   vpc_security_group_ids      = [aws_security_group.bastion_sg.id]
   associate_public_ip_address = true
   key_name                    = aws_key_pair.bastion_key_pair.key_name
-
-  tags = {
-    Name = "Capstone-Bastion-Host"
-  }
 }
 
-# Output the Bastion IP so we can connect to it
-output "bastion_public_ip" {
-  value       = aws_instance.bastion.public_ip
-  description = "Public IP of the Bastion Host"
-}
+output "cluster_endpoint" { value = module.eks.cluster_endpoint }
+output "cluster_name" { value = module.eks.cluster_name }
+output "region" { value = "us-east-1" }
+output "vpc_id" { value = module.vpc.vpc_id }
+output "assets_bucket_name" { value = aws_s3_bucket.assets.id }
+output "bastion_public_ip" { value = aws_instance.bastion.public_ip }
