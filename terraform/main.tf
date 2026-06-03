@@ -55,7 +55,7 @@ module "eks" {
   version = "20.8.5"
 
   cluster_name    = "capstone-cluster"
-  cluster_version = "1.29"
+  cluster_version = "1.30" # BUMPED: Upgraded from the retired 1.29 version
 
   cluster_endpoint_public_access  = true
   
@@ -71,6 +71,7 @@ module "eks" {
 
       instance_types = ["t3.medium"]
       capacity_type  = "ON_DEMAND"
+      ami_type       = "AL2023_x86_64_STANDARD" # ADDED: Explicitly requests the supported Amazon Linux 2023 image
     }
   }
 
