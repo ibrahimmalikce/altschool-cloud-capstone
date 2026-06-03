@@ -11,3 +11,4 @@ crash.*.log
 
 # Ignore OS files
 .DS_Store
+*.pem
