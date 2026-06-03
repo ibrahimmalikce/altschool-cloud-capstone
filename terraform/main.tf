@@ -85,3 +85,78 @@ output "cluster_name" {
 output "cluster_endpoint" {
   value = module.eks.cluster_endpoint
 }
+
+# ==========================================
+# 5. BASTION HOST & SECURITY
+# ==========================================
+
+# Dynamically generate an SSH Key Pair
+resource "tls_private_key" "bastion_key" {
+  algorithm = "RSA"
+  rsa_bits  = 4096
+}
+
+resource "aws_key_pair" "bastion_key_pair" {
+  key_name   = "capstone-bastion-key"
+  public_key = tls_private_key.bastion_key.public_key_openssh
+}
+
+# Save the private key locally so you can use it to connect
+resource "local_file" "private_key" {
+  content         = tls_private_key.bastion_key.private_key_pem
+  filename        = "${path.module}/bastion-key.pem"
+  file_permission = "0400"
+}
+
+# Security Group for the Bastion Host
+resource "aws_security_group" "bastion_sg" {
+  name        = "bastion-sg"
+  description = "Allow SSH access to bastion"
+  vpc_id      = module.vpc.vpc_id
+
+  ingress {
+    from_port   = 22
+    to_port     = 22
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"] # Open to internet for ease of assessment access
+  }
+
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+}
+
+# Fetch the latest Amazon Linux 2023 Image
+data "aws_ami" "amazon_linux" {
+  most_recent = true
+  owners      = ["amazon"]
+
+  filter {
+    name   = "name"
+    values = ["al2023-ami-2023.*-x86_64"]
+  }
+}
+
+# The Bastion EC2 Instance
+resource "aws_instance" "bastion" {
+  ami           = data.aws_ami.amazon_linux.id
+  instance_type = "t3.micro"
+  subnet_id     = module.vpc.public_subnets[0] # CRITICAL: Placed in the public subnet
+
+  vpc_security_group_ids      = [aws_security_group.bastion_sg.id]
+  associate_public_ip_address = true
+  key_name                    = aws_key_pair.bastion_key_pair.key_name
+
+  tags = {
+    Name = "Capstone-Bastion-Host"
+  }
+}
+
+# Output the Bastion IP so we can connect to it
+output "bastion_public_ip" {
+  value       = aws_instance.bastion.public_ip
+  description = "Public IP of the Bastion Host"
+}
