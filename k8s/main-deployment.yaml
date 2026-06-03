@@ -1,0 +1,80 @@
+---
+# 1. Create the Required Namespace
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: retail-app 
+
+---
+# 2. Backend Deployment & Service
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: backend-api
+  namespace: retail-app
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: backend-api
+  template:
+    metadata:
+      labels:
+        app: backend-api
+    spec:
+      containers:
+      - name: golang-backend
+        image: public.ecr.aws/aws-containers/retail-store-sample-catalog:1.0.0
+        ports:
+        - containerPort: 8080
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: backend-service
+  namespace: retail-app
+spec:
+  type: ClusterIP
+  selector:
+    app: backend-api
+  ports:
+    - port: 80
+      targetPort: 8080
+
+---
+# 3. Frontend Deployment & LoadBalancer
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: frontend-ui
+  namespace: retail-app
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: frontend-ui
+  template:
+    metadata:
+      labels:
+        app: frontend-ui
+    spec:
+      containers:
+      - name: react-frontend
+        image: public.ecr.aws/aws-containers/retail-store-sample-ui:1.0.0
+        ports:
+        - containerPort: 8080
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: frontend-service
+  namespace: retail-app
+spec:
+  type: LoadBalancer
+  selector:
+    app: frontend-ui
+  ports:
+    - port: 80
+      targetPort: 8080
